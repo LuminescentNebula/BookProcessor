@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from book_processor import COLUMNS, _extract_json, discover_pairs, process_books, write_table
+from book_processor import COLUMNS, PhotoPair, _extract_json, discover_pairs, process_books, process_pair, query_ollama, write_table
 
 
 class BookProcessorTests(unittest.TestCase):
@@ -46,6 +46,20 @@ class BookProcessorTests(unittest.TestCase):
                 )
             self.assertEqual(starts, [1])
             self.assertEqual(updates, [(1, 1)])
+
+    def test_ollama_timeout_has_actionable_message(self):
+        pair = PhotoPair("box", Path("cover.jpg"), Path("info.jpg"))
+        with patch("book_processor._data_url", return_value="image"), patch(
+            "book_processor.urllib.request.urlopen", side_effect=TimeoutError,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "Уменьшите --workers"):
+                query_ollama(pair, "model", "http://ollama:11434", 10)
+
+    def test_pair_fails_when_every_model_times_out(self):
+        pair = PhotoPair("box", Path("cover.jpg"), Path("info.jpg"))
+        with patch("book_processor.query_ollama", side_effect=RuntimeError("timeout")):
+            with self.assertRaisesRegex(RuntimeError, "Не удалось обработать"):
+                process_pair(pair, ["model-a", "model-b"], "http://ollama:11434", 10)
 
 
 if __name__ == "__main__":

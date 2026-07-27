@@ -5,9 +5,11 @@ from __future__ import annotations
 
 import argparse
 import base64
+import io
 import json
 import os
 import re
+import socket
 import sys
 import urllib.error
 import urllib.request
@@ -56,7 +58,16 @@ def discover_pairs(root: Path, folders: list[str] | None) -> list[PhotoPair]:
 
 
 def _data_url(path: Path) -> str:
-    return base64.b64encode(path.read_bytes()).decode("ascii")
+    """Downscale camera photos before sending them to avoid huge Ollama requests."""
+    from PIL import Image, ImageOps
+
+    max_size = int(os.getenv("MAX_IMAGE_SIZE", "2048"))
+    with Image.open(path) as source:
+        image = ImageOps.exif_transpose(source).convert("RGB")
+        image.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
+        buffer = io.BytesIO()
+        image.save(buffer, format="JPEG", quality=88, optimize=True)
+    return base64.b64encode(buffer.getvalue()).decode("ascii")
 
 
 def _extract_json(text: str) -> dict[str, Any]:
@@ -87,7 +98,8 @@ def query_ollama(pair: PhotoPair, model: str, host: str, timeout: float) -> dict
         "stream": False,
         "format": "json",
         "messages": [{"role": "user", "content": prompt, "images": [_data_url(pair.cover), _data_url(pair.info)]}],
-        "options": {"temperature": 0},
+        "keep_alive": "30m",
+        "options": {"temperature": 0, "num_predict": 512},
     }).encode("utf-8")
     request = urllib.request.Request(
         host.rstrip("/") + "/api/chat", data=payload,
@@ -96,6 +108,14 @@ def query_ollama(pair: PhotoPair, model: str, host: str, timeout: float) -> dict
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             answer = json.load(response)
+    except (TimeoutError, socket.timeout) as error:
+        raise RuntimeError(
+            f"Ollama не ответила за {timeout:g} сек. Уменьшите --workers, "
+            "увеличьте --timeout или проверьте, что модель использует GPU"
+        ) from error
+    except urllib.error.HTTPError as error:
+        details = error.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"Ошибка Ollama HTTP {error.code}: {details}") from error
     except urllib.error.URLError as error:
         raise RuntimeError(f"Ollama недоступна: {error}") from error
     content = answer.get("message", {}).get("content", "")
@@ -106,9 +126,11 @@ def query_ollama(pair: PhotoPair, model: str, host: str, timeout: float) -> dict
 def process_pair(pair: PhotoPair, models: list[str], host: str, timeout: float) -> dict[str, str]:
     result = {field: "" for field in FIELDS}
     errors: list[str] = []
+    successful_models = 0
     for model in models:
         try:
             candidate = query_ollama(pair, model, host, timeout)
+            successful_models += 1
             for field in FIELDS:
                 if not result[field] and candidate[field]:
                     result[field] = candidate[field]
@@ -116,6 +138,8 @@ def process_pair(pair: PhotoPair, models: list[str], host: str, timeout: float) 
             errors.append(f"{model}: {error}")
     if errors:
         print(f"Предупреждение: {pair.cover}: {'; '.join(errors)}", file=sys.stderr)
+    if not successful_models:
+        raise RuntimeError(f"Не удалось обработать {pair.cover.name}: {'; '.join(errors)}")
     return {
         "Коробка": pair.box,
         **result,
@@ -185,7 +209,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output", type=Path, help="Дополнительно сохранить копию в .xlsx")
     parser.add_argument("--database-url", default=os.getenv("DATABASE_URL", "postgresql://bookprocessor:bookprocessor@localhost:5432/bookprocessor"), help="Строка подключения PostgreSQL")
     parser.add_argument("--ollama-host", default="http://localhost:11434", help="Адрес Ollama API")
-    parser.add_argument("--timeout", type=float, default=600, help="Тайм-аут запроса в секундах")
+    parser.add_argument("--timeout", type=float, default=1800, help="Тайм-аут запроса в секундах")
     return parser
 
 

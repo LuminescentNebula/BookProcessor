@@ -44,7 +44,7 @@
     <input id="models" name="models" value="{{ request.form.get('models', 'qwen2.5vl:7b') }}" required>
     <label for="workers">Количество потоков</label><input id="workers" name="workers" type="number" min="1" value="{{ request.form.get('workers', '1') }}" required>
     <label for="ollama_host">Адрес Ollama</label><input id="ollama_host" name="ollama_host" value="{{ request.form.get('ollama_host', ollama_host) }}" required>
-    <label for="timeout">Тайм-аут одного запроса, секунд</label><input id="timeout" name="timeout" type="number" min="1" value="{{ request.form.get('timeout', '600') }}" required>
+    <label for="timeout">Тайм-аут одного запроса, секунд</label><input id="timeout" name="timeout" type="number" min="1" value="{{ request.form.get('timeout', '1800') }}" required>
     <small>Во время обработки не закрывайте страницу. Скорость зависит от модели и GPU.</small>
     <button type="submit">Обработать и сохранить</button>
   </form>
@@ -52,6 +52,7 @@
     <h2>Ход обработки</h2>
     <progress id="progress" value="0" max="1"></progress>
     <p id="progress-text">Подготовка…</p>
+    <p id="elapsed-time">Время текущего запроса: 00:00:00</p>
     <div class="table-wrap"><table><thead><tr id="result-head"></tr></thead><tbody id="result-body"></tbody></table></div>
   </section>
   <script>
@@ -73,6 +74,7 @@
       event.preventDefault(); const form = event.currentTarget; const button = form.querySelector('[type=submit]');
       button.disabled = true; document.querySelector('#progress-panel').style.display = 'block';
       document.querySelector('#result-body').replaceChildren();
+      document.querySelector('#elapsed-time').textContent = 'Время текущего запроса: 00:00:00';
       try {
         const response = await fetch('/process', {method: 'POST', body: new FormData(form)});
         const data = await response.json(); if (!response.ok) throw new Error(data.error);
@@ -84,6 +86,7 @@
       while (true) {
         const response = await fetch('/api/jobs/' + jobId); const job = await response.json();
         const progress = document.querySelector('#progress'); progress.max = Math.max(job.total, 1); progress.value = job.completed;
+        document.querySelector('#elapsed-time').textContent = 'Время текущего запроса: ' + formatDuration(job.elapsed_seconds);
         document.querySelector('#progress-text').textContent = job.status === 'completed' ? `Готово. Сохранено в PostgreSQL, ID: ${job.database_job_id}` : `Обработано ${job.completed} из ${job.total || '…'}`;
         for (const row of job.rows.slice(shown)) { const tr = document.createElement('tr'); tr.replaceChildren(...columns.map(key => { const td = document.createElement('td'); td.textContent = row[key] || ''; return td; })); document.querySelector('#result-body').append(tr); }
         shown = job.rows.length;
@@ -91,6 +94,10 @@
         if (job.status === 'completed') { document.querySelector('#processor-form [type=submit]').disabled = false; return; }
         await new Promise(resolve => setTimeout(resolve, 1000));
       }
+    }
+    function formatDuration(totalSeconds) {
+      const hours = Math.floor(totalSeconds / 3600); const minutes = Math.floor(totalSeconds % 3600 / 60); const seconds = totalSeconds % 60;
+      return [hours, minutes, seconds].map(value => String(value).padStart(2, '0')).join(':');
     }
   </script>
 </main></body></html>

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 import threading
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -52,7 +53,11 @@ def process():
             raise ValueError("Проверьте папку, модели, количество потоков и тайм-аут")
         job_id = uuid.uuid4().hex
         with jobs_lock:
-            jobs[job_id] = {"status": "queued", "completed": 0, "total": 0, "rows": [], "error": None, "database_job_id": None}
+            jobs[job_id] = {
+                "status": "queued", "completed": 0, "total": 0, "rows": [],
+                "error": None, "database_job_id": None, "started_at": time.time(),
+                "finished_at": None,
+            }
         job_executor.submit(run_job, job_id, root, selected, models, workers, request.form["ollama_host"], timeout)
         return jsonify({"job_id": job_id}), 202
     except (KeyError, OSError, RuntimeError, ValueError) as error:
@@ -65,7 +70,13 @@ def job_status(job_id: str):
         state = jobs.get(job_id)
         if state is None:
             return jsonify({"error": "Обработка не найдена"}), 404
-        return jsonify({**state, "rows": [dict(row) for row in state["rows"]]})
+        end = state["finished_at"] or time.time()
+        elapsed_seconds = max(0, int(end - state["started_at"]))
+        return jsonify({
+            **state,
+            "elapsed_seconds": elapsed_seconds,
+            "rows": [dict(row) for row in state["rows"]],
+        })
 
 
 def run_job(job_id: str, root: Path, selected: list[str] | None, models: list[str], workers: int, host: str, timeout: float) -> None:
@@ -88,10 +99,13 @@ def run_job(job_id: str, root: Path, selected: list[str] | None, models: list[st
             rows, str(root), selected, models,
         )
         with jobs_lock:
-            jobs[job_id].update(status="completed", completed=len(rows), total=len(rows), database_job_id=database_job_id)
+            jobs[job_id].update(
+                status="completed", completed=len(rows), total=len(rows),
+                database_job_id=database_job_id, finished_at=time.time(),
+            )
     except Exception as error:  # The error must be visible to the polling browser.
         with jobs_lock:
-            jobs[job_id].update(status="failed", error=str(error))
+            jobs[job_id].update(status="failed", error=str(error), finished_at=time.time())
 
 
 def main() -> None:

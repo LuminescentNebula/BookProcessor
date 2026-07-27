@@ -1,4 +1,5 @@
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -29,10 +30,16 @@ class WebAppTests(unittest.TestCase):
 
     def test_job_status_returns_live_rows(self):
         with jobs_lock:
-            jobs["abc"] = {"status": "processing", "completed": 1, "total": 2, "rows": [{"Название": "Книга"}], "error": None, "database_job_id": None}
+            jobs["abc"] = {
+                "status": "processing", "completed": 1, "total": 2,
+                "rows": [{"Название": "Книга"}], "error": None,
+                "database_job_id": None, "started_at": time.time() - 5,
+                "finished_at": None,
+            }
         response = self.client.get("/api/jobs/abc")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json["rows"][0]["Название"], "Книга")
+        self.assertGreaterEqual(response.json["elapsed_seconds"], 5)
 
     def test_unknown_job_returns_404(self):
         self.assertEqual(self.client.get("/api/jobs/missing").status_code, 404)
