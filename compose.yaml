@@ -1,0 +1,39 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: bookprocessor
+      POSTGRES_USER: bookprocessor
+      POSTGRES_PASSWORD: bookprocessor
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bookprocessor -d bookprocessor"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama_data:/root/.ollama
+
+  app:
+    build: .
+    ports:
+      - "5000:5000"
+    environment:
+      DATABASE_URL: postgresql://bookprocessor:bookprocessor@postgres:5432/bookprocessor
+      OLLAMA_HOST: http://ollama:11434
+      MAX_IMAGE_SIZE: ${MAX_IMAGE_SIZE:-2048}
+    volumes:
+      - ${PHOTOS_PATH:-./photos}:/photos:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+
+volumes:
+  postgres_data:
+  ollama_data:
