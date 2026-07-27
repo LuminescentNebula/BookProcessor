@@ -14,7 +14,7 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 
 FIELDS = ("Автор", "Название", "Год", "Издательство", "Тираж", "Язык", "ISBN")
@@ -149,6 +149,8 @@ def write_table(rows: Iterable[dict[str, str]], output: Path) -> None:
 def process_books(
     root: Path, folders: list[str] | None, models: list[str], workers: int,
     host: str, timeout: float,
+    on_progress: Callable[[dict[str, str], int, int], None] | None = None,
+    on_start: Callable[[int], None] | None = None,
 ) -> list[dict[str, str]]:
     """Process selected boxes and return rows in deterministic photo order."""
     if workers < 1:
@@ -156,14 +158,21 @@ def process_books(
     if not models:
         raise ValueError("Укажите хотя бы одну модель")
     pairs = discover_pairs(root, folders)
+    if on_start:
+        on_start(len(pairs))
     rows: list[dict[str, str] | None] = [None] * len(pairs)
     with ThreadPoolExecutor(max_workers=workers) as executor:
         futures = {
             executor.submit(process_pair, pair, models, host, timeout): index
             for index, pair in enumerate(pairs)
         }
+        completed = 0
         for future in as_completed(futures):
-            rows[futures[future]] = future.result()
+            row = future.result()
+            rows[futures[future]] = row
+            completed += 1
+            if on_progress:
+                on_progress(row, completed, len(pairs))
     return [row for row in rows if row is not None]
 
 

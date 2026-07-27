@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from book_processor import COLUMNS, _extract_json, discover_pairs, process_books, write_table
 
@@ -28,6 +29,23 @@ class BookProcessorTests(unittest.TestCase):
     def test_process_books_validates_workers(self):
         with self.assertRaisesRegex(ValueError, "потоков"):
             process_books(Path("."), None, ["model"], 0, "http://localhost", 1)
+
+    def test_process_books_reports_live_progress(self):
+        with tempfile.TemporaryDirectory() as directory:
+            box = Path(directory) / "box"
+            box.mkdir()
+            (box / "1.jpg").touch()
+            (box / "2.jpg").touch()
+            starts, updates = [], []
+            row = {column: "" for column in COLUMNS}
+            with patch("book_processor.process_pair", return_value=row):
+                process_books(
+                    Path(directory), None, ["model"], 1, "http://localhost", 1,
+                    lambda result, completed, total: updates.append((completed, total)),
+                    starts.append,
+                )
+            self.assertEqual(starts, [1])
+            self.assertEqual(updates, [(1, 1)])
 
 
 if __name__ == "__main__":
