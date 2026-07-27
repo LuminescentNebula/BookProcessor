@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BookProcessor</title>
+  <style>
+    :root { color-scheme: light; font-family: system-ui, sans-serif; color: #172033; background: #f3f5f9; }
+    body { margin: 0; padding: 32px 16px; }
+    main { max-width: 720px; margin: auto; background: white; border-radius: 16px; padding: 30px; box-shadow: 0 8px 30px #1f2a4418; }
+    h1 { margin: 0 0 8px; font-size: 28px; } p { color: #59647a; margin: 0 0 24px; }
+    label, legend { font-weight: 650; font-size: 14px; }
+    input, select { box-sizing: border-box; width: 100%; margin: 7px 0 18px; padding: 11px 12px; border: 1px solid #cbd1dc; border-radius: 8px; font: inherit; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+    .root-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: start; }
+    .root-row button { margin-top: 7px; }
+    fieldset { border: 1px solid #dce1e9; border-radius: 8px; margin: 0 0 18px; padding: 12px; }
+    #folders { display: grid; grid-template-columns: repeat(2, 1fr); max-height: 140px; overflow: auto; gap: 7px; }
+    #folders label { font-weight: 400; } #folders input { width: auto; margin: 0 7px 0 0; }
+    button { border: 0; border-radius: 8px; padding: 12px 18px; font: inherit; font-weight: 700; cursor: pointer; background: #e7ebf3; }
+    button[type=submit] { width: 100%; color: white; background: #315bea; }
+    .error { padding: 12px; color: #8b1a1a; background: #ffe9e9; border-radius: 8px; }
+    .success { padding: 12px; color: #17603a; background: #e5f8ed; border-radius: 8px; }
+    small { color: #6d7688; display: block; margin: -10px 0 18px; }
+    @media (max-width: 540px) { .row, #folders { grid-template-columns: 1fr; } main { padding: 22px; } }
+  </style>
+</head>
+<body><main>
+  <h1>Обработка фотографий книг</h1>
+  <p>Выберите папки и параметры локальной модели. Результат сохранится в PostgreSQL.</p>
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+  {% if success %}<p class="success">{{ success }}</p>{% endif %}
+  <form method="post" action="/process">
+    <label for="root">Корневая папка с коробками</label>
+    <div class="root-row"><input id="root" name="root" value="{{ request.form.get('root', '') }}" placeholder="/home/user/photos" required><button type="button" onclick="loadFolders()">Найти папки</button></div>
+    <fieldset><legend>Коробки</legend><div id="folders">Нажмите «Найти папки». Если ничего не выбирать, будут обработаны все.</div></fieldset>
+    <label for="models">Модели Ollama (через запятую)</label>
+    <input id="models" name="models" value="{{ request.form.get('models', 'qwen2.5vl:7b') }}" required>
+    <label for="workers">Количество потоков</label><input id="workers" name="workers" type="number" min="1" value="{{ request.form.get('workers', '1') }}" required>
+    <label for="ollama_host">Адрес Ollama</label><input id="ollama_host" name="ollama_host" value="{{ request.form.get('ollama_host', ollama_host) }}" required>
+    <label for="timeout">Тайм-аут одного запроса, секунд</label><input id="timeout" name="timeout" type="number" min="1" value="{{ request.form.get('timeout', '600') }}" required>
+    <small>Во время обработки не закрывайте страницу. Скорость зависит от модели и GPU.</small>
+    <button type="submit">Обработать и сохранить</button>
+  </form>
+  <script>
+    async function loadFolders() {
+      const box = document.querySelector('#folders'); box.textContent = 'Загрузка…';
+      try {
+        const response = await fetch('/api/folders?root=' + encodeURIComponent(document.querySelector('#root').value));
+        const data = await response.json(); if (!response.ok) throw new Error(data.error);
+        box.replaceChildren(...data.folders.map(name => {
+          const label = document.createElement('label'); const input = document.createElement('input');
+          input.type = 'checkbox'; input.name = 'folders'; input.value = name; label.append(input, name); return label;
+        }));
+        if (!data.folders.length) box.textContent = 'Подпапки не найдены';
+      } catch (error) { box.textContent = error.message; }
+    }
+  </script>
+</main></body></html>
