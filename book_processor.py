@@ -11,6 +11,7 @@ import os
 import re
 import socket
 import sys
+import time
 import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -19,7 +20,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable
 
 
-FIELDS = ("Автор", "Название", "Год", "Издательство", "Тираж", "Язык", "ISBN")
+FIELDS = ("Автор", "Название", "Год", "Издательство", "Тираж", "Язык", "ISBN", "Жанр")
 COLUMNS = ("Коробка", *FIELDS, "Название файла фото обложки", "Название файла фото информации")
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tif", ".tiff"}
 
@@ -105,19 +106,29 @@ def query_ollama(pair: PhotoPair, model: str, host: str, timeout: float) -> dict
         host.rstrip("/") + "/api/chat", data=payload,
         headers={"Content-Type": "application/json"}, method="POST",
     )
-    try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            answer = json.load(response)
-    except (TimeoutError, socket.timeout) as error:
-        raise RuntimeError(
-            f"Ollama не ответила за {timeout:g} сек. Уменьшите --workers, "
-            "увеличьте --timeout или проверьте, что модель использует GPU"
-        ) from error
-    except urllib.error.HTTPError as error:
-        details = error.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"Ошибка Ollama HTTP {error.code}: {details}") from error
-    except urllib.error.URLError as error:
-        raise RuntimeError(f"Ollama недоступна: {error}") from error
+    attempts = max(1, int(os.getenv("OLLAMA_RETRIES", "3")))
+    answer = None
+    for attempt in range(attempts):
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                answer = json.load(response)
+            break
+        except urllib.error.HTTPError as error:
+            details = error.read().decode("utf-8", errors="replace")
+            if error.code < 500 or attempt == attempts - 1:
+                raise RuntimeError(f"Ошибка Ollama HTTP {error.code}: {details}") from error
+        except (TimeoutError, socket.timeout) as error:
+            if attempt == attempts - 1:
+                raise RuntimeError(
+                    f"Ollama не ответила за {timeout:g} сек. Уменьшите --workers, "
+                    "увеличьте --timeout или проверьте, что модель использует GPU"
+                ) from error
+        except urllib.error.URLError as error:
+            if attempt == attempts - 1:
+                raise RuntimeError(f"Потеряно соединение с Ollama после {attempts} попыток: {error}") from error
+        time.sleep(min(2 ** attempt, 10))
+    if answer is None:
+        raise RuntimeError("Ollama не вернула ответ")
     content = answer.get("message", {}).get("content", "")
     extracted = _extract_json(content)
     return {field: str(extracted.get(field) or "").strip() for field in FIELDS}

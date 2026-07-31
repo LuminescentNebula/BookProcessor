@@ -1,0 +1,21 @@
+<form class="filters" method="get">
+  {% set list_mode = filters.author_select or filters.publisher_select or filters.genre_select %}
+  <div class="mode"><strong>Режим поиска:</strong><label><input type="radio" name="filter_mode" value="text" {% if not list_mode %}checked{% endif %}> По тексту</label><label><input type="radio" name="filter_mode" value="list" {% if list_mode %}checked{% endif %}> Из известных значений</label></div>
+  <div id="text-filters" class="filter-grid">
+    <label>Автор<input name="author" value="{{ filters.author }}" placeholder="Часть имени"></label>
+    <label>Название<input name="title" value="{{ filters.title }}" placeholder="Часть названия"></label>
+    <label>Издательство<input name="publisher" value="{{ filters.publisher }}"></label>
+    <label>Жанр<input name="genre" value="{{ filters.genre }}"></label>
+  </div>
+  <div id="list-filters" class="filter-grid" {% if not list_mode %}hidden{% endif %}>
+    <label>Автор<select name="author_select"><option value="">Все</option>{% for value in known.author %}<option {% if filters.author_select == value %}selected{% endif %}>{{ value }}</option>{% endfor %}</select></label>
+    <label>Издательство<select name="publisher_select"><option value="">Все</option>{% for value in known.publisher %}<option {% if filters.publisher_select == value %}selected{% endif %}>{{ value }}</option>{% endfor %}</select></label>
+    <label>Жанр<select name="genre_select"><option value="">Все</option>{% for value in known.genre %}<option {% if filters.genre_select == value %}selected{% endif %}>{{ value }}</option>{% endfor %}</select></label>
+  </div>
+  {% if sort %}<input type="hidden" name="sort" value="{{ sort }}"><input type="hidden" name="direction" value="{{ direction }}">{% endif %}
+  <div class="actions"><button class="button">Найти</button><a class="button secondary" href="{{ request.path }}">Сбросить</a></div>
+</form>
+<script>
+function setFilterMode(list){const textBox=document.querySelector('#text-filters'),listBox=document.querySelector('#list-filters');textBox.hidden=list;listBox.hidden=!list;textBox.querySelectorAll('input').forEach(value=>value.disabled=list);listBox.querySelectorAll('select').forEach(value=>value.disabled=!list)}
+document.querySelectorAll('[name=filter_mode]').forEach(radio=>radio.addEventListener('change',()=>{if(radio.checked)setFilterMode(radio.value==='list')}));setFilterMode({{ 'true' if list_mode else 'false' }});
+</script>

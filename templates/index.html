@@ -12,42 +12,34 @@
     label, legend { font-weight: 650; font-size: 14px; }
     input, select { box-sizing: border-box; width: 100%; margin: 7px 0 18px; padding: 11px 12px; border: 1px solid #cbd1dc; border-radius: 8px; font: inherit; }
     .row { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
-    .root-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: start; }
-    .root-row button { margin-top: 7px; }
-    fieldset { border: 1px solid #dce1e9; border-radius: 8px; margin: 0 0 18px; padding: 12px; }
-    #folders { display: grid; grid-template-columns: repeat(2, 1fr); max-height: 140px; overflow: auto; gap: 7px; }
-    #folders label { font-weight: 400; } #folders input { width: auto; margin: 0 7px 0 0; }
     button { border: 0; border-radius: 8px; padding: 12px 18px; font: inherit; font-weight: 700; cursor: pointer; background: #e7ebf3; }
     button[type=submit] { width: 100%; color: white; background: #315bea; }
     .error { padding: 12px; color: #8b1a1a; background: #ffe9e9; border-radius: 8px; }
     .success { padding: 12px; color: #17603a; background: #e5f8ed; border-radius: 8px; }
+    #services { display: flex; gap: 10px; margin: 0 0 20px; flex-wrap: wrap; }
+    .service { padding: 7px 10px; border-radius: 999px; font-size: 13px; background: #e7ebf3; }
+    .service.ok { color: #17603a; background: #e5f8ed; }
+    .service.bad { color: #8b1a1a; background: #ffe9e9; }
     progress { width: 100%; height: 20px; accent-color: #315bea; }
     #progress-panel { display: none; margin-top: 24px; }
     .table-wrap { overflow-x: auto; margin-top: 16px; }
     table { border-collapse: collapse; width: 100%; font-size: 13px; }
     th, td { border: 1px solid #dce1e9; padding: 8px; text-align: left; white-space: nowrap; }
     th { background: #f3f5f9; position: sticky; top: 0; }
+    #job-list { display: grid; gap: 8px; margin: 18px 0; }
+    .job { padding: 10px 12px; background: #f3f5f9; border-radius: 8px; font-size: 14px; }
     small { color: #6d7688; display: block; margin: -10px 0 18px; }
     @media (max-width: 540px) { .row, #folders { grid-template-columns: 1fr; } main { padding: 22px; } }
   </style>
 </head>
 <body><main>
   <h1>Обработка фотографий книг</h1>
-  <p>Выберите папки и параметры локальной модели. Результат сохранится в PostgreSQL.</p>
+  <p><a href="/library">Библиотека</a> · <a href="/books">Таблица книг</a></p>
+  <p>Добавляйте папки-коробки в mounted-каталог <code>/photos</code>. Приложение автоматически поставит их в очередь.</p>
+  <div id="services"><span id="ollama-state" class="service">Ollama: проверка…</span><span id="database-state" class="service">PostgreSQL: проверка…</span><span id="photos-state" class="service">Каталог: проверка…</span></div>
   {% if error %}<p class="error">{{ error }}</p>{% endif %}
   {% if success %}<p class="success">{{ success }}</p>{% endif %}
-  <form id="processor-form" method="post" action="/process">
-    <label for="root">Корневая папка с коробками</label>
-    <div class="root-row"><input id="root" name="root" value="{{ request.form.get('root', '') }}" placeholder="/home/user/photos" required><button type="button" onclick="loadFolders()">Найти папки</button></div>
-    <fieldset><legend>Коробки</legend><div id="folders">Нажмите «Найти папки». Если ничего не выбирать, будут обработаны все.</div></fieldset>
-    <label for="models">Модели Ollama (через запятую)</label>
-    <input id="models" name="models" value="{{ request.form.get('models', 'qwen2.5vl:7b') }}" required>
-    <label for="workers">Количество потоков</label><input id="workers" name="workers" type="number" min="1" value="{{ request.form.get('workers', '1') }}" required>
-    <label for="ollama_host">Адрес Ollama</label><input id="ollama_host" name="ollama_host" value="{{ request.form.get('ollama_host', ollama_host) }}" required>
-    <label for="timeout">Тайм-аут одного запроса, секунд</label><input id="timeout" name="timeout" type="number" min="1" value="{{ request.form.get('timeout', '1800') }}" required>
-    <small>Во время обработки не закрывайте страницу. Скорость зависит от модели и GPU.</small>
-    <button type="submit">Обработать и сохранить</button>
-  </form>
+  <div id="job-list"><div class="job">Ожидание новых папок…</div></div>
   <section id="progress-panel">
     <h2>Ход обработки</h2>
     <progress id="progress" value="0" max="1"></progress>
@@ -58,46 +50,29 @@
   <script>
     const columns = ['Коробка','Автор','Название','Год','Издательство','Тираж','Язык','ISBN','Название файла фото обложки','Название файла фото информации'];
     document.querySelector('#result-head').replaceChildren(...columns.map(value => { const th = document.createElement('th'); th.textContent = value; return th; }));
-    async function loadFolders() {
-      const box = document.querySelector('#folders'); box.textContent = 'Загрузка…';
+    const statuses = {queued: 'В очереди', processing: 'Распознавание', saving: 'Сохранение', waiting_database: 'Ожидание PostgreSQL', completed: 'Готово', failed: 'Ошибка'};
+    async function updateJobs() {
       try {
-        const response = await fetch('/api/folders?root=' + encodeURIComponent(document.querySelector('#root').value));
-        const data = await response.json(); if (!response.ok) throw new Error(data.error);
-        box.replaceChildren(...data.folders.map(name => {
-          const label = document.createElement('label'); const input = document.createElement('input');
-          input.type = 'checkbox'; input.name = 'folders'; input.value = name; label.append(input, name); return label;
-        }));
-        if (!data.folders.length) box.textContent = 'Подпапки не найдены';
-      } catch (error) { box.textContent = error.message; }
-    }
-    document.querySelector('#processor-form').addEventListener('submit', async event => {
-      event.preventDefault(); const form = event.currentTarget; const button = form.querySelector('[type=submit]');
-      button.disabled = true; document.querySelector('#progress-panel').style.display = 'block';
-      document.querySelector('#result-body').replaceChildren();
-      document.querySelector('#elapsed-time').textContent = 'Время текущего запроса: 00:00:00';
-      try {
-        const response = await fetch('/process', {method: 'POST', body: new FormData(form)});
-        const data = await response.json(); if (!response.ok) throw new Error(data.error);
-        await watchJob(data.job_id);
-      } catch (error) { document.querySelector('#progress-text').textContent = 'Ошибка: ' + error.message; button.disabled = false; }
-    });
-    async function watchJob(jobId) {
-      let shown = 0;
-      while (true) {
-        const response = await fetch('/api/jobs/' + jobId); const job = await response.json();
-        const progress = document.querySelector('#progress'); progress.max = Math.max(job.total, 1); progress.value = job.completed;
+        const data = await (await fetch('/api/jobs')).json(); const list = document.querySelector('#job-list');
+        list.replaceChildren(...(data.jobs.length ? data.jobs : [{folder: 'Новых папок пока нет', status: 'queued'}]).map(job => { const item = document.createElement('div'); item.className = 'job'; item.textContent = `${job.folder || 'Ручной запуск'} — ${statuses[job.status] || job.status}${job.error ? ': ' + job.error : ''}`; return item; }));
+        if (!data.jobs.length) return;
+        const job = data.jobs.find(value => !['completed','failed'].includes(value.status)) || data.jobs[0];
+        document.querySelector('#progress-panel').style.display = 'block'; const progress = document.querySelector('#progress'); progress.max = Math.max(job.total, 1); progress.value = job.completed;
         document.querySelector('#elapsed-time').textContent = 'Время текущего запроса: ' + formatDuration(job.elapsed_seconds);
-        document.querySelector('#progress-text').textContent = job.status === 'completed' ? `Готово. Сохранено в PostgreSQL, ID: ${job.database_job_id}` : `Обработано ${job.completed} из ${job.total || '…'}`;
-        for (const row of job.rows.slice(shown)) { const tr = document.createElement('tr'); tr.replaceChildren(...columns.map(key => { const td = document.createElement('td'); td.textContent = row[key] || ''; return td; })); document.querySelector('#result-body').append(tr); }
-        shown = job.rows.length;
-        if (job.status === 'failed') throw new Error(job.error);
-        if (job.status === 'completed') { document.querySelector('#processor-form [type=submit]').disabled = false; return; }
-        await new Promise(resolve => setTimeout(resolve, 1000));
-      }
+        document.querySelector('#progress-text').textContent = `${job.folder || ''}: ${statuses[job.status] || job.status} — ${job.completed} из ${job.total || '…'}`;
+        document.querySelector('#result-body').replaceChildren(...job.rows.map(row => { const tr = document.createElement('tr'); tr.replaceChildren(...columns.map(key => { const td = document.createElement('td'); td.textContent = row[key] || ''; return td; })); return tr; }));
+      } catch (error) { document.querySelector('#job-list').textContent = 'Не удалось получить состояние очереди'; }
     }
     function formatDuration(totalSeconds) {
       const hours = Math.floor(totalSeconds / 3600); const minutes = Math.floor(totalSeconds % 3600 / 60); const seconds = totalSeconds % 60;
       return [hours, minutes, seconds].map(value => String(value).padStart(2, '0')).join(':');
     }
+    async function updateHealth() {
+      try {
+        const health = await (await fetch('/api/health')).json();
+        for (const name of ['ollama', 'database', 'photos']) { const element = document.querySelector('#' + name + '-state'); const state = health[name]; element.textContent = state.message; element.className = 'service ' + (state.ok ? 'ok' : 'bad'); }
+      } catch (error) { for (const element of document.querySelectorAll('.service')) { element.className = 'service bad'; element.textContent = 'Приложение недоступно'; } }
+    }
+    updateHealth(); updateJobs(); setInterval(updateHealth, 5000); setInterval(updateJobs, 1000);
   </script>
 </main></body></html>

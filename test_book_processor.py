@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+import os
 from pathlib import Path
 from unittest.mock import patch
 
@@ -49,7 +50,7 @@ class BookProcessorTests(unittest.TestCase):
 
     def test_ollama_timeout_has_actionable_message(self):
         pair = PhotoPair("box", Path("cover.jpg"), Path("info.jpg"))
-        with patch("book_processor._data_url", return_value="image"), patch(
+        with patch.dict(os.environ, {"OLLAMA_RETRIES": "1"}), patch("book_processor._data_url", return_value="image"), patch(
             "book_processor.urllib.request.urlopen", side_effect=TimeoutError,
         ):
             with self.assertRaisesRegex(RuntimeError, "Уменьшите --workers"):

@@ -26,6 +26,13 @@ services:
       DATABASE_URL: postgresql://bookprocessor:bookprocessor@postgres:5432/bookprocessor
       OLLAMA_HOST: http://ollama:11434
       MAX_IMAGE_SIZE: ${MAX_IMAGE_SIZE:-2048}
+      OLLAMA_RETRIES: ${OLLAMA_RETRIES:-3}
+      PHOTOS_ROOT: /photos
+      OLLAMA_MODELS: ${OLLAMA_MODELS:-qwen2.5vl:7b}
+      BOOK_WORKERS: ${BOOK_WORKERS:-1}
+      OLLAMA_TIMEOUT: ${OLLAMA_TIMEOUT:-1800}
+      FOLDER_SCAN_INTERVAL: ${FOLDER_SCAN_INTERVAL:-5}
+      FOLDER_STABLE_SECONDS: ${FOLDER_STABLE_SECONDS:-10}
     volumes:
       - ${PHOTOS_PATH:-./photos}:/photos:ro
     depends_on:
