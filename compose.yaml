@@ -13,18 +13,13 @@ services:
       timeout: 5s
       retries: 10
 
-  ollama:
-    image: ollama/ollama:latest
-    volumes:
-      - ollama_data:/root/.ollama
-
   app:
     build: .
     ports:
       - "5000:5000"
     environment:
       DATABASE_URL: postgresql://bookprocessor:bookprocessor@postgres:5432/bookprocessor
-      OLLAMA_HOST: http://ollama:11434
+      OLLAMA_HOST: ${OLLAMA_API_URL:-127.0.0.1:11434}
       MAX_IMAGE_SIZE: ${MAX_IMAGE_SIZE:-2048}
       OLLAMA_RETRIES: ${OLLAMA_RETRIES:-3}
       PHOTOS_ROOT: /photos
@@ -35,12 +30,11 @@ services:
       FOLDER_STABLE_SECONDS: ${FOLDER_STABLE_SECONDS:-10}
     volumes:
       - ${PHOTOS_PATH:-./photos}:/photos:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy
-      ollama:
-        condition: service_started
 
 volumes:
   postgres_data:
-  ollama_data:
