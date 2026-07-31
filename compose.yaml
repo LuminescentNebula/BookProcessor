@@ -19,7 +19,7 @@ services:
       - "5000:5000"
     environment:
       DATABASE_URL: postgresql://bookprocessor:bookprocessor@postgres:5432/bookprocessor
-      OLLAMA_HOST: ${OLLAMA_API_URL:-http://host.docker.internal:11434}
+      OLLAMA_HOST: ${OLLAMA_API_URL:-127.0.0.1:11434}
       MAX_IMAGE_SIZE: ${MAX_IMAGE_SIZE:-2048}
       OLLAMA_RETRIES: ${OLLAMA_RETRIES:-3}
       PHOTOS_ROOT: /photos
