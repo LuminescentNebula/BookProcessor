@@ -1,3 +1,4 @@
+import math
 import time
 import uuid
 from pathlib import Path
@@ -44,14 +45,26 @@ def process():
 @bp.get("/api/jobs/<job_id>")
 @admin_required
 def job_status(job_id):
+    try:
+        page = int(request.args.get("page", "1"))
+        per_page = min(int(request.args.get("per_page", current_app.config["JOB_ROW_PAGE_SIZE"])), 100)
+        if page < 1 or per_page < 1:
+            raise ValueError
+    except ValueError:
+        return jsonify({"error": "Некорректные параметры страницы"}), 400
     job_state = state()
     with job_state.lock:
         item = job_state.jobs.get(job_id)
         if item is None:
             return jsonify({"error": "Обработка не найдена"}), 404
         end = item["finished_at"] or time.time()
-        result = {**item, "elapsed_seconds": max(0, int(end - item["started_at"]))}
-        result["rows"] = [dict(row) for row in item["rows"]]
+        rows = item["rows"]
+        total_pages = max(1, math.ceil(len(rows) / per_page))
+        page = min(page, total_pages)
+        result = {key: value for key, value in item.items() if key != "rows"}
+        result.update(elapsed_seconds=max(0, int(end - item["started_at"])), page=page,
+                      per_page=per_page, total_rows=len(rows), total_pages=total_pages)
+        result["rows"] = [dict(row) for row in rows[(page - 1) * per_page:page * per_page]]
         return jsonify(result)
 
 @bp.get("/api/jobs")
@@ -60,10 +73,12 @@ def all_jobs():
     job_state = state()
     with job_state.lock:
         result = []
-        for job_id, item in reversed(list(job_state.jobs.items())):
+        all_items = list(job_state.jobs.items())
+        for job_id, item in reversed(all_items[-current_app.config["JOB_LIST_LIMIT"]:]):
             end = item["finished_at"] or time.time()
-            result.append({"job_id": job_id, **item, "elapsed_seconds": max(0, int(end - item["started_at"]))})
-        return jsonify({"jobs": result})
+            summary = {key: value for key, value in item.items() if key != "rows"}
+            result.append({"job_id": job_id, **summary, "row_count": len(item["rows"]), "elapsed_seconds": max(0, int(end - item["started_at"]))})
+        return jsonify({"jobs": result, "total_jobs": len(all_items)})
 
 def run_job(app, job_id, root, selected, models, workers, host, timeout, source_path=None, source_signature=None):
     with app.app_context():

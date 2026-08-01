@@ -4,10 +4,33 @@ import types
 import unittest
 from unittest.mock import MagicMock, patch
 
-from database import DatabaseUnavailable, INSERT_BOOK, get_books, load_settings, save_books, save_settings, source_was_processed, update_book
+from database import DatabaseUnavailable, INSERT_BOOK, count_books, get_books, list_books, load_settings, save_books, save_settings, source_was_processed, update_book
 
 
 class DatabaseTests(unittest.TestCase):
+    def test_count_and_page_use_identical_filters_and_limit_is_capped(self):
+        columns = [MagicMock()]
+        columns[0].name = "id"
+        cursor = MagicMock(description=columns)
+        cursor.fetchall.return_value = []
+        connection = MagicMock(); connection.__enter__.return_value = connection
+        connection.cursor.return_value.__enter__.return_value = cursor
+        count_result = MagicMock(); count_result.fetchone.return_value = (7,)
+        connection.execute.return_value = count_result
+        psycopg = types.SimpleNamespace(connect=MagicMock(return_value=connection), OperationalError=Exception)
+        filters = {"author": "Толстой", "publisher_select": "Наука"}
+        with patch("database.importlib.import_module", return_value=psycopg):
+            self.assertEqual(count_books("db", filters), 7)
+            list_books("db", filters, limit=999, offset=-3)
+        count_query, count_values = connection.execute.call_args.args
+        list_query, list_values = cursor.execute.call_args.args
+        self.assertIn("COUNT(*)", count_query)
+        self.assertIn("b.author ILIKE %s", count_query)
+        self.assertIn("b.publisher = %s", count_query)
+        self.assertEqual(count_values, ["%Толстой%", "Наука"])
+        self.assertIn("LIMIT %s OFFSET %s", list_query)
+        self.assertEqual(list_values, ["%Толстой%", "Наука", 100, 0])
+
     def test_save_books_creates_job_and_inserts_rows(self):
         cursor = MagicMock()
         cursor.fetchone.return_value = (42,)

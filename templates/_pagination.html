@@ -1,0 +1,6 @@
+{% macro pagination_nav(pagination) %}
+<nav class="pagination" aria-label="Навигация по страницам">
+  <span>Всего: {{ pagination.total }} · Страница {{ pagination.page }} из {{ pagination.total_pages }}</span>
+  <div>{% if pagination.previous_url %}<a class="button secondary" rel="prev" href="{{ pagination.previous_url }}">← Предыдущая</a>{% endif %} {% if pagination.next_url %}<a class="button secondary" rel="next" href="{{ pagination.next_url }}">Следующая →</a>{% endif %}</div>
+</nav>
+{% endmacro %}

@@ -1,3 +1,4 @@
+import math
 import time
 import urllib.parse
 import uuid
@@ -15,6 +16,11 @@ def _state():
 def book_page(template):
     filters = {name: request.args.get(name, "") for name in ("author", "title", "publisher", "genre", "author_select", "publisher_select", "genre_select")}
     sort, direction = request.args.get("sort", "id"), request.args.get("direction", "desc")
+    try:
+        requested_page = int(request.args.get("page", "1"))
+    except ValueError:
+        requested_page = 1
+    page_size = min(max(int(current_app.config["BOOK_PAGE_SIZE"]), 1), 100)
     sort_urls = {}
     for column in ("box", "author", "title", "year", "publisher", "isbn", "genre"):
         arguments = {key: value for key, value in filters.items() if value}
@@ -22,9 +28,20 @@ def book_page(template):
         sort_urls[column] = request.path + "?" + urllib.parse.urlencode(arguments)
     try:
         db = services().database
-        return render_template(template, books=db.list_books(database_url(), filters, sort, direction), known=db.known_book_values(database_url()), filters=filters, sort=sort, direction=direction, sort_urls=sort_urls)
+        total = db.count_books(database_url(), filters)
+        total_pages = max(1, math.ceil(total / page_size))
+        page = min(max(requested_page, 1), total_pages)
+        books = db.list_books(database_url(), filters, sort, direction, page_size, (page - 1) * page_size)
+        query = {key: value for key, value in {**filters, "sort": sort, "direction": direction}.items() if value}
+        def page_url(target):
+            return request.path + "?" + urllib.parse.urlencode({**query, "page": target})
+        pagination = {"page": page, "total": total, "total_pages": total_pages,
+                      "previous_url": page_url(page - 1) if page > 1 else None,
+                      "next_url": page_url(page + 1) if page < total_pages else None}
+        return render_template(template, books=books, known=db.known_book_values(database_url()), filters=filters, sort=sort, direction=direction, sort_urls=sort_urls, pagination=pagination)
     except DatabaseUnavailable as error:
-        return render_template(template, books=[], known={"author": [], "publisher": [], "genre": []}, filters=filters, error=str(error), sort=sort, direction=direction, sort_urls=sort_urls), 503
+        pagination = {"page": 1, "total": 0, "total_pages": 1, "previous_url": None, "next_url": None}
+        return render_template(template, books=[], known={"author": [], "publisher": [], "genre": []}, filters=filters, error=str(error), sort=sort, direction=direction, sort_urls=sort_urls, pagination=pagination), 503
 
 @bp.get("/library")
 @login_required

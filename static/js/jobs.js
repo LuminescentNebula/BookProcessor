@@ -3,6 +3,23 @@ const statuses = {queued:'В очереди',processing:'Распознаван�
 const head = document.querySelector('#result-head');
 head.replaceChildren(...columns.map(value => Object.assign(document.createElement('th'), {textContent:value})));
 function formatDuration(total){return [Math.floor(total/3600),Math.floor(total%3600/60),total%60].map(value=>String(value).padStart(2,'0')).join(':')}
-async function updateJobs(){try{const data=await(await fetch('/api/jobs')).json(),list=document.querySelector('#job-list');list.replaceChildren(...(data.jobs.length?data.jobs:[{folder:'Новых папок пока нет',status:'queued'}]).map(job=>{const item=document.createElement('div');item.className='job';item.textContent=`${job.folder||'Ручной запуск'} — ${statuses[job.status]||job.status}${job.error?': '+job.error:''}`;return item}));if(!data.jobs.length)return;const job=data.jobs.find(value=>!['completed','failed'].includes(value.status))||data.jobs[0],progress=document.querySelector('#progress');document.querySelector('#progress-panel').style.display='block';progress.max=Math.max(job.total,1);progress.value=job.completed;document.querySelector('#elapsed-time').textContent='Время текущего запроса: '+formatDuration(job.elapsed_seconds);document.querySelector('#progress-text').textContent=`${job.folder||''}: ${statuses[job.status]||job.status} — ${job.completed} из ${job.total||'…'}`;document.querySelector('#result-body').replaceChildren(...job.rows.map(row=>{const tr=document.createElement('tr');tr.replaceChildren(...columns.map(key=>Object.assign(document.createElement('td'),{textContent:row[key]||''})));return tr}))}catch(error){document.querySelector('#job-list').textContent='Не удалось получить состояние очереди'}}
+let currentJobId = null, jobPage = 1;
+async function updateJobs(){try{
+  const data=await(await fetch('/api/jobs')).json(),list=document.querySelector('#job-list');
+  document.querySelector('#job-total').textContent=`Всего заданий: ${data.total_jobs}`;
+  list.replaceChildren(...(data.jobs.length?data.jobs:[{folder:'Новых папок пока нет',status:'queued'}]).map(job=>{const item=document.createElement('div');item.className='job';item.textContent=`${job.folder||'Ручной запуск'} — ${statuses[job.status]||job.status}${job.error?': '+job.error:''}`;return item}));
+  if(!data.jobs.length)return;
+  const summary=data.jobs.find(value=>!['completed','failed'].includes(value.status))||data.jobs[0];
+  if(currentJobId!==summary.job_id){currentJobId=summary.job_id;jobPage=1}
+  const job=await(await fetch(`/api/jobs/${currentJobId}?page=${jobPage}`)).json(),progress=document.querySelector('#progress');
+  jobPage=job.page; document.querySelector('#progress-panel').style.display='block';progress.max=Math.max(job.total,1);progress.value=job.completed;
+  document.querySelector('#elapsed-time').textContent='Время текущего запроса: '+formatDuration(job.elapsed_seconds);
+  document.querySelector('#progress-text').textContent=`${job.folder||''}: ${statuses[job.status]||job.status} — ${job.completed} из ${job.total||'…'}`;
+  document.querySelector('#row-total').textContent=`Результатов: ${job.total_rows}`;document.querySelector('#job-page').textContent=`Страница ${job.page} из ${job.total_pages}`;
+  document.querySelector('#job-prev').disabled=job.page<=1;document.querySelector('#job-next').disabled=job.page>=job.total_pages;
+  document.querySelector('#result-body').replaceChildren(...job.rows.map(row=>{const tr=document.createElement('tr');tr.replaceChildren(...columns.map(key=>Object.assign(document.createElement('td'),{textContent:row[key]||''})));return tr}));
+}catch(error){document.querySelector('#job-list').textContent='Не удалось получить состояние очереди'}}
+document.querySelector('#job-prev').addEventListener('click',()=>{if(jobPage>1){jobPage--;updateJobs()}});
+document.querySelector('#job-next').addEventListener('click',()=>{jobPage++;updateJobs()});
 async function updateHealth(){try{const health=await(await fetch('/api/health')).json();for(const name of ['ollama','database','photos']){const element=document.querySelector('#'+name+'-state'),value=health[name];element.textContent=value.message;element.className='service '+(value.ok?'ok':'bad')}const providers=document.querySelector('#provider-states');providers.replaceChildren(...health.providers.map(provider=>{const item=document.createElement('span');item.className='service '+(provider.status==='available'?'ok':provider.status==='unavailable'?'bad':'');item.textContent=`${provider.name}: ${provider.status==='unknown'?'не проверялся':provider.message}`;return item}))}catch(error){for(const element of document.querySelectorAll('.service')){element.className='service bad';element.textContent='Приложение недоступно'}}}
 updateHealth();updateJobs();setInterval(updateHealth,5000);setInterval(updateJobs,1000);

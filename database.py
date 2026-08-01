@@ -277,9 +277,10 @@ def get_books(database_url: str, book_ids: list[int]) -> list[dict[str, Any]]:
         raise DatabaseUnavailable(f"PostgreSQL временно недоступна: {error}") from error
 
 
-def list_books(database_url: str, filters: dict[str, str], sort: str = "id", direction: str = "desc") -> list[dict[str, Any]]:
-    """Load processed books using parameterized filters and an allowlisted order."""
-    psycopg = importlib.import_module("psycopg")
+MAX_BOOK_PAGE_SIZE = 100
+
+
+def _book_filters(filters: dict[str, str]) -> tuple[list[str], list[str]]:
     clauses: list[str] = []
     values: list[str] = []
     for name in ("author", "title", "publisher", "genre"):
@@ -291,6 +292,14 @@ def list_books(database_url: str, filters: dict[str, str], sort: str = "id", dir
         if selected:
             clauses.append(f"{BOOK_COLUMNS[name]} = %s")
             values.append(selected)
+    return clauses, values
+
+
+def list_books(database_url: str, filters: dict[str, str], sort: str = "id", direction: str = "desc", limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
+    """Load processed books using parameterized filters and an allowlisted order."""
+    psycopg = importlib.import_module("psycopg")
+    clauses, values = _book_filters(filters)
+    limit, offset = min(max(int(limit), 1), MAX_BOOK_PAGE_SIZE), max(int(offset), 0)
     order = BOOK_COLUMNS.get(sort, BOOK_COLUMNS["id"])
     order_direction = "ASC" if direction.casefold() == "asc" else "DESC"
     query = f"""
@@ -300,14 +309,27 @@ def list_books(database_url: str, filters: dict[str, str], sort: str = "id", dir
         FROM books b
         {"WHERE " + " AND ".join(clauses) if clauses else ""}
         ORDER BY {order} {order_direction} NULLS LAST, b.id DESC
+        LIMIT %s OFFSET %s
     """
     try:
         with psycopg.connect(database_url, connect_timeout=5) as connection:
             with connection.cursor() as cursor:
                 cursor.execute(SCHEMA)
-                cursor.execute(query, values)
+                cursor.execute(query, [*values, limit, offset])
                 names = [column.name for column in cursor.description]
                 return [dict(zip(names, row)) for row in cursor.fetchall()]
+    except psycopg.OperationalError as error:
+        raise DatabaseUnavailable(f"PostgreSQL временно недоступна: {error}") from error
+
+
+def count_books(database_url: str, filters: dict[str, str]) -> int:
+    """Count books using the same filters as ``list_books``."""
+    psycopg = importlib.import_module("psycopg")
+    clauses, values = _book_filters(filters)
+    query = f'SELECT COUNT(*) FROM books b {"WHERE " + " AND ".join(clauses) if clauses else ""}'
+    try:
+        with psycopg.connect(database_url, connect_timeout=5) as connection:
+            return int(connection.execute(query, values).fetchone()[0])
     except psycopg.OperationalError as error:
         raise DatabaseUnavailable(f"PostgreSQL временно недоступна: {error}") from error
 

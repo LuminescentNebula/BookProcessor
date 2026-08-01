@@ -4,7 +4,7 @@
 <h1>Обработка фотографий книг</h1>
 <p>Добавляйте папки-коробки в mounted-каталог <code>/photos</code>. Они автоматически попадут в очередь.</p>
 <div id="services"><span id="ollama-state" class="service">Ollama: проверка…</span><span id="database-state" class="service">PostgreSQL: проверка…</span><span id="photos-state" class="service">Каталог: проверка…</span><span id="provider-states"></span></div>
-<div id="job-list"><div class="job">Ожидание новых папок…</div></div>
-<section id="progress-panel"><h2>Ход обработки</h2><progress id="progress" value="0" max="1"></progress><p id="progress-text">Подготовка…</p><p id="elapsed-time">Время текущего запроса: 00:00:00</p><div class="table-wrap"><table><thead><tr id="result-head"></tr></thead><tbody id="result-body"></tbody></table></div></section>
+<p id="job-total" class="muted">Всего заданий: 0</p><div id="job-list"><div class="job">Ожидание новых папок…</div></div>
+<section id="progress-panel"><h2>Ход обработки</h2><progress id="progress" value="0" max="1"></progress><p id="progress-text">Подготовка…</p><p id="elapsed-time">Время текущего запроса: 00:00:00</p><p id="row-total">Результатов: 0</p><div class="table-wrap"><table><thead><tr id="result-head"></tr></thead><tbody id="result-body"></tbody></table></div><nav class="pagination"><button id="job-prev" class="button secondary">← Предыдущая</button><span id="job-page">Страница 1 из 1</span><button id="job-next" class="button secondary">Следующая →</button></nav></section>
 {% endblock %}
 {% block scripts %}<script src="{{ url_for('static', filename='js/jobs.js') }}" defer></script>{% endblock %}
