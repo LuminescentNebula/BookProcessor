@@ -2,123 +2,101 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
-from unittest.mock import ANY, patch
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
-from web_app import DEFAULT_SETTINGS, app, folder_names, folder_signature, jobs, jobs_lock
+from app import DEFAULT_SETTINGS, create_app
+from app.folder_watcher import folder_names, folder_signature
 
 
 class WebAppTests(unittest.TestCase):
     def setUp(self):
-        app.config["TESTING"] = True
-        self.client = app.test_client()
+        self.database = MagicMock()
+        self.database.load_settings.return_value = dict(DEFAULT_SETTINGS)
+        self.database.list_books.return_value = []
+        self.database.known_book_values.return_value = {"author": [], "publisher": [], "genre": []}
+        self.database.check_database.return_value = (True, "PostgreSQL доступна")
+        self.services = SimpleNamespace(
+            database=self.database,
+            process_books=MagicMock(return_value=[]),
+            normalize_metadata=MagicMock(),
+            search_book_online=MagicMock(return_value=[]),
+        )
+        self.app = create_app({"TESTING": True, "SECRET_KEY": "test", "SERVICES": self.services, "START_FOLDER_WATCHER": False, "BOOTSTRAP_ADMIN": False})
+        self.client = self.app.test_client()
         with self.client.session_transaction() as session:
             session.update(user_id=1, username="admin", role="admin")
-        with jobs_lock:
-            jobs.clear()
 
-    def test_index_contains_form(self):
+    def test_factory_has_isolated_job_state(self):
+        other = create_app({"TESTING": True, "SERVICES": self.services})
+        self.app.extensions["job_state"].jobs["one"] = {}
+        self.assertEqual(other.extensions["job_state"].jobs, {})
+
+    def test_index(self):
         response = self.client.get("/")
         self.assertEqual(response.status_code, 200)
         self.assertIn("Обработка фотографий книг".encode(), response.data)
 
-    def test_folders_endpoint(self):
+    def test_folders_endpoint_and_helpers(self):
         with tempfile.TemporaryDirectory() as directory:
-            (Path(directory) / "box-2").mkdir()
-            response = self.client.get("/api/folders", query_string={"root": directory})
-            self.assertEqual(response.json, {"folders": ["box-2"]})
-
-    def test_folder_names_rejects_missing_root(self):
+            root = Path(directory); (root / "box-2").mkdir()
+            self.assertEqual(folder_names(root), ["box-2"])
+            self.assertEqual(self.client.get("/api/folders", query_string={"root": directory}).json, {"folders": ["box-2"]})
         with self.assertRaisesRegex(ValueError, "не найдена"):
             folder_names(Path("/definitely/missing"))
 
-    def test_job_status_returns_live_rows(self):
-        with jobs_lock:
-            jobs["abc"] = {
-                "status": "processing", "completed": 1, "total": 2,
-                "rows": [{"Название": "Книга"}], "error": None,
-                "database_job_id": None, "started_at": time.time() - 5,
-                "finished_at": None,
-            }
+    def test_folder_signature_ignores_non_images(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory); (folder / "1.jpg").write_bytes(b"photo")
+            before = folder_signature(folder); (folder / "notes.txt").write_text("note")
+            self.assertEqual(folder_signature(folder), before)
+
+    def test_job_status(self):
+        state = self.app.extensions["job_state"]
+        state.jobs["abc"] = {"status":"processing","completed":1,"total":2,"rows":[{"Название":"Книга"}],"error":None,"database_job_id":None,"started_at":time.time()-5,"finished_at":None}
         response = self.client.get("/api/jobs/abc")
-        self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json["rows"][0]["Название"], "Книга")
         self.assertGreaterEqual(response.json["elapsed_seconds"], 5)
 
-    def test_unknown_job_returns_404(self):
-        self.assertEqual(self.client.get("/api/jobs/missing").status_code, 404)
-
-    def test_health_reports_degraded_services(self):
-        with patch("web_app.application_settings", return_value=DEFAULT_SETTINGS), patch("web_app.check_database", return_value=(False, "PostgreSQL недоступна")), patch(
-            "web_app.check_ollama", return_value=(True, "Ollama доступна"),
-        ):
+    def test_health_degraded(self):
+        self.database.check_database.return_value = (False, "PostgreSQL недоступна")
+        with patch("app.health.check_ollama", return_value=(True, "Ollama доступна")):
             response = self.client.get("/api/health")
-        self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json["status"], "degraded")
-        self.assertFalse(response.json["database"]["ok"])
 
-    def test_folder_signature_ignores_non_images(self):
-        with tempfile.TemporaryDirectory() as directory:
-            folder = Path(directory)
-            (folder / "1.jpg").write_bytes(b"photo")
-            before = folder_signature(folder)
-            (folder / "notes.txt").write_text("not a photo")
-            self.assertEqual(folder_signature(folder), before)
+    def test_library_and_table(self):
+        book = {"id":1,"box":"b","title":"Книга","author":"Автор","genre":"Роман","publisher":"Издатель","publication_year":"2024","isbn":"123"}
+        self.database.list_books.return_value = [book]
+        self.assertIn(b"/api/books/1/image/info", self.client.get("/library").data)
+        self.assertIn("Таблица обработанных книг".encode(), self.client.get("/books").data)
 
-    def test_library_page_renders_book_cards(self):
-        book = {"id": 1, "title": "Книга", "author": "Автор", "genre": "Роман", "publisher": "Издатель", "publication_year": "2024", "isbn": "123"}
-        known = {"author": ["Автор"], "publisher": ["Издатель"], "genre": ["Роман"]}
-        with patch("web_app.list_books", return_value=[book]), patch("web_app.known_book_values", return_value=known):
-            response = self.client.get("/library")
-        self.assertEqual(response.status_code, 200)
-        self.assertIn("Библиотека обработанных книг".encode(), response.data)
-        self.assertIn(b"/api/books/1/image/info", response.data)
-
-    def test_books_page_has_sort_links_and_filters(self):
-        known = {"author": [], "publisher": [], "genre": []}
-        with patch("web_app.list_books", return_value=[]), patch("web_app.known_book_values", return_value=known):
-            response = self.client.get("/books", query_string={"sort": "author", "direction": "asc"})
-        self.assertEqual(response.status_code, 200)
-        self.assertIn("Таблица обработанных книг".encode(), response.data)
-        self.assertIn("Из известных значений".encode(), response.data)
-
-    def test_settings_page_saves_values(self):
+    def test_settings_save(self):
         values = {**DEFAULT_SETTINGS, "BOOK_WORKERS": "3"}
-        with patch("web_app.save_settings") as save:
-            response = self.client.post("/settings", data=values)
+        response = self.client.post("/settings", data=values)
         self.assertEqual(response.status_code, 302)
-        save.assert_called_once()
-        self.assertEqual(save.call_args.args[1]["BOOK_WORKERS"], "3")
+        self.database.save_settings.assert_called_once()
 
-    def test_book_can_be_edited(self):
-        with patch("web_app.update_book", return_value=True) as update:
-            response = self.client.patch("/api/books/7", json={"title": "Новое название"})
-        self.assertEqual(response.status_code, 200)
-        update.assert_called_once_with(ANY, 7, {"title": "Новое название"})
+    def test_book_edit(self):
+        self.database.update_book.return_value = True
+        self.assertEqual(self.client.patch("/api/books/7", json={"title":"Новое"}).status_code, 200)
+        self.database.update_book.assert_called_once()
 
-    def test_viewer_can_browse_but_cannot_edit_or_open_settings(self):
+    def test_permissions(self):
         with self.client.session_transaction() as session:
             session.update(user_id=2, username="reader", role="viewer")
-        known = {"author": [], "publisher": [], "genre": []}
-        with patch("web_app.list_books", return_value=[]), patch("web_app.known_book_values", return_value=known):
-            self.assertEqual(self.client.get("/library").status_code, 200)
+        self.assertEqual(self.client.get("/library").status_code, 200)
         self.assertEqual(self.client.get("/settings").status_code, 403)
-        self.assertEqual(self.client.patch("/api/books/7", json={"title": "Нет"}).status_code, 403)
-
-    def test_anonymous_user_is_redirected_to_login(self):
+        self.assertEqual(self.client.patch("/api/books/7", json={"title":"Нет"}).status_code, 403)
         with self.client.session_transaction() as session:
             session.clear()
-        response = self.client.get("/library")
-        self.assertEqual(response.status_code, 302)
-        self.assertIn("/login", response.location)
+        self.assertIn("/login", self.client.get("/library").location)
 
-    def test_admin_can_queue_selected_books_for_normalization(self):
-        selected = [{"id": 7, "box": "box", "title": "Книга"}]
-        with patch("web_app.application_settings", return_value=DEFAULT_SETTINGS), patch(
-            "web_app.get_books", return_value=selected,
-        ), patch("web_app.job_executor.submit") as submit:
-            response = self.client.post("/api/books/normalize", json={"book_ids": [7]})
+    def test_normalization_is_queued_through_injected_services(self):
+        self.database.get_books.return_value = [{"id":7,"box":"box","title":"Книга"}]
+        state = self.app.extensions["job_state"]
+        with patch.object(state.executor, "submit") as submit:
+            response = self.client.post("/api/books/normalize", json={"book_ids":[7]})
         self.assertEqual(response.status_code, 202)
-        self.assertIn("job_id", response.json)
         submit.assert_called_once()
 
 

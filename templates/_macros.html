@@ -1,0 +1,10 @@
+{% macro messages(error=None, success=None) %}
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+  {% if success %}<p class="success">{{ success }}</p>{% endif %}
+{% endmacro %}
+{% macro input_field(name, label, value='', type='text', hint=None, required=True, attrs='') %}
+<label>{{ label }}
+  <input name="{{ name }}" type="{{ type }}" value="{{ value }}" {% if required %}required{% endif %} {{ attrs|safe }}>
+  {% if hint %}<span class="hint">{{ hint }}</span>{% endif %}
+</label>
+{% endmacro %}
