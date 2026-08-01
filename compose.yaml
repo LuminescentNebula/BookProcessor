@@ -1,0 +1,37 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: bookprocessor
+      POSTGRES_USER: bookprocessor
+      POSTGRES_PASSWORD: bookprocessor
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bookprocessor -d bookprocessor"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    ports:
+      - "5000:5000"
+    environment:
+      DATABASE_URL: postgresql://bookprocessor:bookprocessor@postgres:5432/bookprocessor
+      MAX_IMAGE_SIZE: ${MAX_IMAGE_SIZE:-2048}
+      OLLAMA_RETRIES: ${OLLAMA_RETRIES:-3}
+      PHOTOS_ROOT: /photos
+      SECRET_KEY: ${SECRET_KEY:-replace-with-a-long-random-secret}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-change-me-now}
+    volumes:
+      - ${PHOTOS_PATH:-./photos}:/photos:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
