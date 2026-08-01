@@ -11,7 +11,7 @@ def create_app(config=None):
     app.config.from_object(Config)
     if config:
         app.config.update(config)
-    app.extensions["bookprocessor_services"] = app.config.get("SERVICES") or default_services()
+    app.extensions["bookprocessor_services"] = app.config.get("SERVICES") or default_services(app.config)
     app.extensions["job_state"] = JobState(app.config["WEB_JOB_WORKERS"])
 
     from .auth import bp as auth_bp

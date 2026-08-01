@@ -3,7 +3,7 @@
 {% block content %}
 <h1>Обработка фотографий книг</h1>
 <p>Добавляйте папки-коробки в mounted-каталог <code>/photos</code>. Они автоматически попадут в очередь.</p>
-<div id="services"><span id="ollama-state" class="service">Ollama: проверка…</span><span id="database-state" class="service">PostgreSQL: проверка…</span><span id="photos-state" class="service">Каталог: проверка…</span></div>
+<div id="services"><span id="ollama-state" class="service">Ollama: проверка…</span><span id="database-state" class="service">PostgreSQL: проверка…</span><span id="photos-state" class="service">Каталог: проверка…</span><span id="provider-states"></span></div>
 <div id="job-list"><div class="job">Ожидание новых папок…</div></div>
 <section id="progress-panel"><h2>Ход обработки</h2><progress id="progress" value="0" max="1"></progress><p id="progress-text">Подготовка…</p><p id="elapsed-time">Время текущего запроса: 00:00:00</p><div class="table-wrap"><table><thead><tr id="result-head"></tr></thead><tbody id="result-body"></tbody></table></div></section>
 {% endblock %}

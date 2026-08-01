@@ -88,7 +88,8 @@ def run_normalization_job(app, job_id, books, settings):
         try:
             for completed, book in enumerate(books, 1):
                 metadata = {label: str(book.get(column) or "") for label, column in russian.items()}
-                normalized = svc.normalize_metadata(metadata, svc.search_book_online(metadata), settings["NORMALIZATION_MODEL"], settings["OLLAMA_HOST"], float(settings["OLLAMA_TIMEOUT"]))
+                evidence = [item.as_dict() for item in svc.internet_search.search(metadata)]
+                normalized = svc.normalize_metadata(metadata, evidence, settings["NORMALIZATION_MODEL"], settings["OLLAMA_HOST"], float(settings["OLLAMA_TIMEOUT"]))
                 merged = {label: normalized[label] or metadata[label] for label in FIELDS}
                 if merged["Тираж"]:
                     merged["Тираж"] = "".join(char for char in merged["Тираж"] if char.isdigit())

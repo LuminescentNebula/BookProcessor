@@ -19,3 +19,10 @@ class Config:
     BOOTSTRAP_ADMIN = False
     ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
     ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "change-me-now")
+    OPEN_LIBRARY_TIMEOUT = float(os.getenv("OPEN_LIBRARY_TIMEOUT", "10"))
+    OPEN_LIBRARY_RETRIES = int(os.getenv("OPEN_LIBRARY_RETRIES", "2"))
+    OPEN_LIBRARY_MIN_INTERVAL = float(os.getenv("OPEN_LIBRARY_MIN_INTERVAL", "0.5"))
+    GOOGLE_BOOKS_TIMEOUT = float(os.getenv("GOOGLE_BOOKS_TIMEOUT", "10"))
+    GOOGLE_BOOKS_RETRIES = int(os.getenv("GOOGLE_BOOKS_RETRIES", "2"))
+    GOOGLE_BOOKS_MIN_INTERVAL = float(os.getenv("GOOGLE_BOOKS_MIN_INTERVAL", "0.5"))
+    GOOGLE_BOOKS_API_KEY = os.getenv("GOOGLE_BOOKS_API_KEY", "")

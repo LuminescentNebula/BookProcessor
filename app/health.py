@@ -28,4 +28,12 @@ def health():
     root = Path(current_app.config["PHOTOS_ROOT"])
     photos_ok = root.is_dir()
     photos_message = f"Каталог фотографий: {root}" if photos_ok else f"Mounted-каталог не найден: {root}"
-    return jsonify(status="ready" if database_ok and ollama_ok and photos_ok else "degraded", database={"ok": database_ok, "message": database_message}, ollama={"ok": ollama_ok, "message": ollama_message}, photos={"ok": photos_ok, "message": photos_message})
+    providers = services().internet_search.health()
+    providers_ok = not providers or any(item.get("status") != "unavailable" for item in providers)
+    return jsonify(
+        status="ready" if database_ok and ollama_ok and photos_ok and providers_ok else "degraded",
+        database={"ok": database_ok, "message": database_message},
+        ollama={"ok": ollama_ok, "message": ollama_message},
+        photos={"ok": photos_ok, "message": photos_message},
+        providers=providers,
+    )

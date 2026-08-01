@@ -78,7 +78,7 @@ def run_job(app, job_id, root, selected, models, workers, host, timeout, source_
         try:
             with job_state.lock:
                 job_state.jobs[job_id]["status"] = "processing"
-            rows = svc.process_books(root, selected, models, workers, host, timeout, progress, start, None)
+            rows = svc.process_books(root, selected, models, workers, host, timeout, progress, start, None, svc.internet_search)
             wait_seconds = 2
             while True:
                 try:

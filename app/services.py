@@ -1,16 +1,17 @@
 from types import SimpleNamespace
 import database
 import book_processor
+from providers import create_registry
 from flask import current_app
 from .config import DEFAULT_SETTINGS
 
 
-def default_services():
+def default_services(config):
     return SimpleNamespace(
         database=database,
         process_books=book_processor.process_books,
         normalize_metadata=book_processor.normalize_metadata,
-        search_book_online=book_processor.search_book_online,
+        internet_search=create_registry(config),
     )
 
 

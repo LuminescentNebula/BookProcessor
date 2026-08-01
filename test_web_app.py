@@ -20,8 +20,9 @@ class WebAppTests(unittest.TestCase):
             database=self.database,
             process_books=MagicMock(return_value=[]),
             normalize_metadata=MagicMock(),
-            search_book_online=MagicMock(return_value=[]),
+            internet_search=MagicMock(),
         )
+        self.services.internet_search.health.return_value = []
         self.app = create_app({"TESTING": True, "SECRET_KEY": "test", "SERVICES": self.services, "START_FOLDER_WATCHER": False, "BOOTSTRAP_ADMIN": False})
         self.client = self.app.test_client()
         with self.client.session_transaction() as session:
@@ -63,6 +64,15 @@ class WebAppTests(unittest.TestCase):
         with patch("app.health.check_ollama", return_value=(True, "Ollama доступна")):
             response = self.client.get("/api/health")
         self.assertEqual(response.json["status"], "degraded")
+
+    def test_health_contains_independent_provider_states(self):
+        self.services.internet_search.health.return_value = [
+            {"name": "Open Library", "status": "available", "message": "Доступен"},
+            {"name": "Google Books", "status": "unavailable", "message": "offline"},
+        ]
+        with patch("app.health.check_ollama", return_value=(True, "Ollama доступна")):
+            response = self.client.get("/api/health")
+        self.assertEqual([item["status"] for item in response.json["providers"]], ["available", "unavailable"])
 
     def test_library_and_table(self):
         book = {"id":1,"box":"b","title":"Книга","author":"Автор","genre":"Роман","publisher":"Издатель","publication_year":"2024","isbn":"123"}

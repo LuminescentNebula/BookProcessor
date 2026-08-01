@@ -13,12 +13,12 @@ import socket
 import sys
 import time
 import urllib.error
-import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterable
+from providers import ProviderRegistry, create_registry
 
 
 FIELDS = ("Автор", "Название", "Год", "Издательство", "Тираж", "Язык", "ISBN", "Жанр")
@@ -138,22 +138,6 @@ def query_ollama(pair: PhotoPair, model: str, host: str, timeout: float) -> dict
     return {field: str(extracted.get(field) or "").strip() for field in FIELDS}
 
 
-def search_book_online(metadata: dict[str, str], timeout: float = 15) -> list[dict[str, Any]]:
-    """Search Open Library for evidence used by the normalization model."""
-    query = " ".join(value for value in (metadata.get("Автор", ""), metadata.get("Название", ""), metadata.get("ISBN", "")) if value)
-    if not query:
-        return []
-    fields = "title,author_name,first_publish_year,publisher,isbn,language,subject,edition_count"
-    url = "https://openlibrary.org/search.json?" + urllib.parse.urlencode({"q": query, "limit": 5, "fields": fields})
-    request = urllib.request.Request(url, headers={"User-Agent": "BookProcessor/1.0"})
-    try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            data = json.load(response)
-        return data.get("docs", [])[:5]
-    except (OSError, ValueError, urllib.error.URLError):
-        return []
-
-
 def normalize_metadata(metadata: dict[str, str], evidence: list[dict[str, Any]], model: str, host: str, timeout: float) -> dict[str, str]:
     """Use a separate text model to normalize OCR fields against online evidence."""
     prompt = (
@@ -163,7 +147,7 @@ def normalize_metadata(metadata: dict[str, str], evidence: list[dict[str, Any]],
         "Заполни другие пропуски только при надёжном совпадении. Верни только JSON со всеми ключами шаблона.\n"
         f"Шаблон: {json.dumps({field: '' for field in FIELDS}, ensure_ascii=False)}\n"
         f"Распознано: {json.dumps(metadata, ensure_ascii=False)}\n"
-        f"Интернет-источник Open Library: {json.dumps(evidence, ensure_ascii=False)[:24000]}"
+        f"Библиографические интернет-источники: {json.dumps(evidence, ensure_ascii=False)[:24000]}"
     )
     answer = _ollama_chat(host, {
         "model": model, "stream": False, "format": "json", "keep_alive": "30m",
@@ -174,7 +158,7 @@ def normalize_metadata(metadata: dict[str, str], evidence: list[dict[str, Any]],
     return {field: str(parsed.get(field) or "").strip() for field in FIELDS}
 
 
-def process_pair(pair: PhotoPair, models: list[str], host: str, timeout: float, normalization_model: str | None = None) -> dict[str, str]:
+def process_pair(pair: PhotoPair, models: list[str], host: str, timeout: float, normalization_model: str | None = None, internet_search: ProviderRegistry | None = None) -> dict[str, str]:
     result = {field: "" for field in FIELDS}
     errors: list[str] = []
     successful_models = 0
@@ -193,7 +177,8 @@ def process_pair(pair: PhotoPair, models: list[str], host: str, timeout: float, 
         raise RuntimeError(f"Не удалось обработать {pair.cover.name}: {'; '.join(errors)}")
     if normalization_model:
         try:
-            normalized = normalize_metadata(result, search_book_online(result), normalization_model, host, timeout)
+            evidence = [item.as_dict() for item in internet_search.search(result)] if internet_search else []
+            normalized = normalize_metadata(result, evidence, normalization_model, host, timeout)
             result = {field: normalized[field] or result[field] for field in FIELDS}
         except Exception as error:
             print(f"Предупреждение: нормализация {pair.cover}: {error}", file=sys.stderr)
@@ -235,6 +220,7 @@ def process_books(
     on_progress: Callable[[dict[str, str], int, int], None] | None = None,
     on_start: Callable[[int], None] | None = None,
     normalization_model: str | None = None,
+    internet_search: ProviderRegistry | None = None,
 ) -> list[dict[str, str]]:
     """Process selected boxes and return rows in deterministic photo order."""
     if workers < 1:
@@ -247,7 +233,7 @@ def process_books(
     rows: list[dict[str, str] | None] = [None] * len(pairs)
     with ThreadPoolExecutor(max_workers=workers) as executor:
         futures = {
-            executor.submit(process_pair, pair, models, host, timeout, normalization_model): index
+            executor.submit(process_pair, pair, models, host, timeout, normalization_model, internet_search): index
             for index, pair in enumerate(pairs)
         }
         completed = 0
@@ -278,9 +264,11 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     models = [model.strip() for model in args.models.split(",") if model.strip()]
     try:
+        registry = create_registry(os.environ) if args.normalization_model.strip() else None
         rows = process_books(
             args.root, args.folders, models, args.workers, args.ollama_host, args.timeout,
             normalization_model=args.normalization_model.strip() or None,
+            internet_search=registry,
         )
     except (OSError, ValueError) as error:
         raise SystemExit(str(error)) from error
