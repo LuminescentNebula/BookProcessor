@@ -28,9 +28,6 @@ def create_app(config=None):
             app.config["DATABASE_URL"], app.config["ADMIN_USERNAME"],
             generate_password_hash(app.config["ADMIN_PASSWORD"]),
         )
-    if app.config.get("START_FOLDER_WATCHER"):
-        from .folder_watcher import start_folder_watcher
-        app.extensions["folder_watcher"] = start_folder_watcher(app)
     return app
 
 

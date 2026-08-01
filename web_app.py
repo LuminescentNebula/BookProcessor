@@ -1,5 +1,5 @@
-"""Backward-compatible WSGI import; new code should use app.create_app."""
+"""Production WSGI application; background work runs in worker.py."""
 
 from app import create_app
 
-app = create_app({"BOOTSTRAP_ADMIN": True, "START_FOLDER_WATCHER": True})
+app = create_app({"BOOTSTRAP_ADMIN": True})

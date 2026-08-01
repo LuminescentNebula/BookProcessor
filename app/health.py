@@ -9,6 +9,15 @@ from .services import application_settings, database_url, services
 
 bp = Blueprint("health", __name__)
 
+@bp.get("/healthz")
+def web_health():
+    """Unauthenticated container probe for the web process and PostgreSQL."""
+    try:
+        database_ok, message = services().database.check_database(database_url())
+    except DatabaseUnavailable as error:
+        database_ok, message = False, str(error)
+    return jsonify(status="ready" if database_ok else "degraded", message=message), 200 if database_ok else 503
+
 def check_ollama(host):
     try:
         with urllib.request.urlopen(host.rstrip("/") + "/api/tags", timeout=3) as response:

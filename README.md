@@ -9,9 +9,10 @@
 
 Веб-приложение создаётся фабрикой `app.create_app(config)`. Маршруты разделены
 на Flask blueprints в `app/auth.py`, `app/books.py`, `app/admin.py`,
-`app/jobs.py` и `app/health.py`; наблюдатель mounted-папки находится в
-`app/folder_watcher.py`. Точка запуска контейнера — `run.py`, а `web_app.py`
-оставлен как совместимый WSGI-import.
+`app/jobs.py` и `app/health.py`. Наблюдатель mounted-папки и выполнение
+автоматической очереди вынесены в отдельный процесс `worker.py`;
+`app/folder_watcher.py` оставляет совместимые импорты утилит. WSGI-приложение
+экспортируется из `web_app.py` и запускается Gunicorn без фонового watcher.
 
 Общие стили находятся в `static/css/app.css`, а клиентская логика таблицы,
 библиотеки и очереди — в `static/js/books.js`, `static/js/library.js` и
@@ -57,9 +58,9 @@ PHOTOS_PATH=/абсолютный/путь/к/фотографиям \
 нужно: каждая подпапка mounted-каталога автоматически становится коробкой и
 добавляется в очередь после того, как её содержимое не менялось 10 секунд.
 Новые подпапки можно добавлять во время работы приложения. Результаты будут
-сохранены в PostgreSQL. Docker Compose запускает только приложение и PostgreSQL;
+сохранены в PostgreSQL. Docker Compose запускает web-приложение, отдельный worker и PostgreSQL;
 Ollama продолжает работать отдельно по адресу из настроек приложения. Данные
-PostgreSQL сохраняются в volume `postgres_data`.
+PostgreSQL сохраняются в volume `postgres_data`. Web и worker имеют раздельные health checks. При `SIGTERM` worker перестаёт брать новые папки, завершает текущее распознавание, а если результат нельзя сохранить из-за недоступности PostgreSQL — освобождает папку для повторной постановки после следующего запуска.
 
 При первом запуске создаётся администратор. Обязательно задайте надёжные значения
 `ADMIN_USERNAME`, `ADMIN_PASSWORD` и `SECRET_KEY` перед запуском Compose:

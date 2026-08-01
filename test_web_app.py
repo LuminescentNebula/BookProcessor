@@ -39,6 +39,16 @@ class WebAppTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("Обработка фотографий книг".encode(), response.data)
 
+    def test_wsgi_factory_does_not_start_folder_watcher(self):
+        self.assertNotIn("folder_watcher", self.app.extensions)
+
+    def test_web_health_is_separate_and_does_not_require_login(self):
+        with self.client.session_transaction() as session:
+            session.clear()
+        response = self.client.get("/healthz")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json["status"], "ready")
+
     def test_folders_endpoint_and_helpers(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory); (root / "box-2").mkdir()

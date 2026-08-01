@@ -39,6 +39,40 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/healthz', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  worker:
+    build: .
+    command: ["python", "worker.py"]
+    environment:
+      DATABASE_URL: postgresql://bookprocessor:bookprocessor@postgres:5432/bookprocessor
+      MAX_IMAGE_SIZE: ${MAX_IMAGE_SIZE:-2048}
+      OLLAMA_RETRIES: ${OLLAMA_RETRIES:-3}
+      PHOTOS_ROOT: /photos
+      OPEN_LIBRARY_TIMEOUT: ${OPEN_LIBRARY_TIMEOUT:-10}
+      OPEN_LIBRARY_RETRIES: ${OPEN_LIBRARY_RETRIES:-2}
+      OPEN_LIBRARY_MIN_INTERVAL: ${OPEN_LIBRARY_MIN_INTERVAL:-0.5}
+      GOOGLE_BOOKS_TIMEOUT: ${GOOGLE_BOOKS_TIMEOUT:-10}
+      GOOGLE_BOOKS_RETRIES: ${GOOGLE_BOOKS_RETRIES:-2}
+      GOOGLE_BOOKS_MIN_INTERVAL: ${GOOGLE_BOOKS_MIN_INTERVAL:-0.5}
+      GOOGLE_BOOKS_API_KEY: ${GOOGLE_BOOKS_API_KEY:-}
+    volumes:
+      - ${PHOTOS_PATH:-./photos}:/photos:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    stop_grace_period: 35m
+    healthcheck:
+      test: ["CMD", "python", "worker.py", "--health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 volumes:
   postgres_data:
