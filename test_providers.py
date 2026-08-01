@@ -2,9 +2,11 @@ import unittest
 import urllib.error
 from unittest.mock import patch
 
-from providers import Evidence, ProviderRegistry
+from providers import Evidence, ProviderRegistry, create_registry
+from providers.crossref import CrossrefProvider
 from providers.google_books import GoogleBooksProvider
 from providers.open_library import OpenLibraryProvider
+from providers.library_of_congress import LibraryOfCongressProvider
 from providers.queries import build_queries
 
 
@@ -22,6 +24,13 @@ class FakeProvider:
 
 
 class ProviderTests(unittest.TestCase):
+    def test_default_registry_contains_multiple_independent_catalogues(self):
+        registry = create_registry({})
+        self.assertEqual(
+            [provider.name for provider in registry.providers],
+            ["Open Library", "Google Books", "Crossref", "Library of Congress"],
+        )
+
     def test_query_variants_cover_isbn_metadata_and_title_words(self):
         queries = build_queries({
             "ISBN": "978-5-123-45678-9", "Автор": "Лев Толстой",
@@ -58,6 +67,30 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual(open_result.source_url, "https://openlibrary.org/works/OL1W")
         self.assertEqual(google_result.source_url, "https://google/item")
         self.assertEqual((open_library.timeout, google.timeout), (3, 4))
+
+    def test_crossref_maps_book_metadata(self):
+        provider = CrossrefProvider(timeout=3, retries=1, min_interval=0)
+        payload = {"message": {"items": [{
+            "DOI": "10.1/book", "URL": "https://doi.org/10.1/book", "title": ["Книга"],
+            "author": [{"given": "Иван", "family": "Иванов"}], "publisher": "Наука",
+            "published": {"date-parts": [[1999]]}, "ISBN": ["9785000000001"],
+            "language": "ru", "subject": ["История"],
+        }]}}
+        with patch.object(provider, "get_json", return_value=payload):
+            result = provider.search({"Название": "Книга"})[0]
+        self.assertEqual((result.title, result.authors, result.year), ("Книга", ("Иван Иванов",), "1999"))
+        self.assertEqual(result.source_url, "https://doi.org/10.1/book")
+
+    def test_library_of_congress_maps_catalogue_record(self):
+        provider = LibraryOfCongressProvider(timeout=3, retries=1, min_interval=0)
+        payload = {"results": [{"id": "https://www.loc.gov/item/1/", "title": "Buch",
+            "contributor": ["Mann, Thomas"], "publisher": ["Fischer"], "date": "1924",
+            "isbn": ["978-3-10-000000-0"], "language": ["German"], "subject": ["Novel"]}]}
+        with patch.object(provider, "get_json", return_value=payload):
+            result = provider.search({"Название": "Buch"})[0]
+        self.assertEqual(result.source, "Library of Congress")
+        self.assertEqual(result.isbns, ("9783100000000",))
+        self.assertEqual(result.source_url, "https://www.loc.gov/item/1/")
 
     def test_provider_retries_and_reports_unavailable(self):
         provider = OpenLibraryProvider(timeout=2, retries=2, min_interval=0)

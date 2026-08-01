@@ -26,6 +26,13 @@ class Config:
     GOOGLE_BOOKS_RETRIES = int(os.getenv("GOOGLE_BOOKS_RETRIES", "2"))
     GOOGLE_BOOKS_MIN_INTERVAL = float(os.getenv("GOOGLE_BOOKS_MIN_INTERVAL", "0.5"))
     GOOGLE_BOOKS_API_KEY = os.getenv("GOOGLE_BOOKS_API_KEY", "")
+    CROSSREF_TIMEOUT = float(os.getenv("CROSSREF_TIMEOUT", "10"))
+    CROSSREF_RETRIES = int(os.getenv("CROSSREF_RETRIES", "2"))
+    CROSSREF_MIN_INTERVAL = float(os.getenv("CROSSREF_MIN_INTERVAL", "0.5"))
+    CROSSREF_MAILTO = os.getenv("CROSSREF_MAILTO", "")
+    LOC_TIMEOUT = float(os.getenv("LOC_TIMEOUT", "10"))
+    LOC_RETRIES = int(os.getenv("LOC_RETRIES", "2"))
+    LOC_MIN_INTERVAL = float(os.getenv("LOC_MIN_INTERVAL", "0.5"))
     BOOK_PAGE_SIZE = 24
     JOB_LIST_LIMIT = 20
     JOB_ROW_PAGE_SIZE = 50
