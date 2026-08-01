@@ -1,4 +1,19 @@
-<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{% block title %}BookProcessor{% endblock %}</title><style>
-:root{font-family:system-ui,sans-serif;color:#172033;background:#f3f5f9}body{margin:0}nav{background:#172033;padding:14px max(16px,calc((100% - 1200px)/2));display:flex;gap:18px}nav a{color:white;text-decoration:none;font-weight:650}main{max-width:1200px;margin:28px auto;padding:0 16px}h1{margin-bottom:8px}.muted{color:#657086}.error{padding:12px;background:#ffe9e9;color:#8b1a1a;border-radius:8px}.filters{background:white;padding:18px;border-radius:12px;margin:20px 0;box-shadow:0 4px 18px #1f2a4412}.filter-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.filters label{font-size:13px;font-weight:650}.filters input,.filters select{box-sizing:border-box;width:100%;margin-top:5px;padding:9px;border:1px solid #ccd3df;border-radius:7px}.mode{display:flex;gap:18px;margin-bottom:14px}.mode input{width:auto}.actions{margin-top:14px;display:flex;gap:10px}.button{border:0;border-radius:7px;padding:10px 16px;background:#315bea;color:white;font-weight:700;text-decoration:none;cursor:pointer}.secondary{background:#e7ebf3;color:#172033}@media(max-width:760px){.filter-grid{grid-template-columns:1fr 1fr}}@media(max-width:480px){.filter-grid{grid-template-columns:1fr}nav{flex-wrap:wrap}}
-{% block style %}{% endblock %}</style></head><body><nav><a href="/">Обработка</a><a href="/library">Библиотека</a><a href="/books">Таблица</a></nav><main>{% block content %}{% endblock %}</main>{% block script %}{% endblock %}</body></html>
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{% block title %}BookProcessor{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+  {% block head %}{% endblock %}
+</head>
+<body data-role="{{ session.role or '' }}">
+<nav>
+  {% if session.role == 'admin' %}<a href="/">Обработка</a>{% endif %}
+  <a href="/library">Библиотека</a><a href="/books">Таблица</a>
+  {% if session.role == 'admin' %}<a href="/settings">Настройки</a><a href="/users">Пользователи</a>{% endif %}
+  <form method="post" action="/logout" class="logout"><button class="button secondary">Выйти ({{ session.username }})</button></form>
+</nav>
+<main>{% block content %}{% endblock %}</main>
+{% block scripts %}{% endblock %}
+</body></html>

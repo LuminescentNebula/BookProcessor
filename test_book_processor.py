@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 from unittest.mock import patch
 
-from book_processor import COLUMNS, PhotoPair, _extract_json, discover_pairs, process_books, process_pair, query_ollama, write_table
+from book_processor import COLUMNS, PhotoPair, _extract_json, discover_pairs, normalize_metadata, process_books, process_pair, query_ollama, write_table
 
 
 class BookProcessorTests(unittest.TestCase):
@@ -61,6 +61,21 @@ class BookProcessorTests(unittest.TestCase):
         with patch("book_processor.query_ollama", side_effect=RuntimeError("timeout")):
             with self.assertRaisesRegex(RuntimeError, "Не удалось обработать"):
                 process_pair(pair, ["model-a", "model-b"], "http://ollama:11434", 10)
+
+    def test_normalization_uses_separate_text_model(self):
+        response = {"message": {"content": '{"Автор":"Лев Николаевич Толстой","Название":"Война и мир","Тираж":"10000"}'}}
+        with patch("book_processor._ollama_chat", return_value=response) as chat:
+            result = normalize_metadata({"Автор": "Л. ТОЛСТОЙ", "Название": "ВОЙНА И МИР"}, [{"isbn": ["123"]}], "text-model", "http://ollama", 30)
+        self.assertEqual(result["Автор"], "Лев Николаевич Толстой")
+        self.assertEqual(chat.call_args.args[1]["model"], "text-model")
+
+    def test_print_run_is_saved_as_digits_only(self):
+        pair = PhotoPair("box", Path("cover.jpg"), Path("info.jpg"))
+        raw = {field: "" for field in COLUMNS if field not in ("Коробка", "Название файла фото обложки", "Название файла фото информации")}
+        raw["Тираж"] = "10 000 экз."
+        with patch("book_processor.query_ollama", return_value=raw):
+            result = process_pair(pair, ["vision"], "http://ollama", 30)
+        self.assertEqual(result["Тираж"], "10000")
 
 
 if __name__ == "__main__":

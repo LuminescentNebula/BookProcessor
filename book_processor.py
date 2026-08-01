@@ -18,6 +18,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterable
+from providers import ProviderRegistry, create_registry
 
 
 FIELDS = ("Автор", "Название", "Год", "Издательство", "Тираж", "Язык", "ISBN", "Жанр")
@@ -85,34 +86,18 @@ def _extract_json(text: str) -> dict[str, Any]:
     return value
 
 
-def query_ollama(pair: PhotoPair, model: str, host: str, timeout: float) -> dict[str, str]:
-    schema = {field: "" for field in FIELDS}
-    prompt = (
-        "На первом изображении обложка книги, на втором — выходные данные издательства. "
-        "Точно распознай сведения только с изображений. Ничего не выдумывай. "
-        "Если значение не видно или его нет, оставь пустую строку. "
-        "Верни только один JSON-объект с ключами в точности как в шаблоне: "
-        + json.dumps(schema, ensure_ascii=False)
-    )
-    payload = json.dumps({
-        "model": model,
-        "stream": False,
-        "format": "json",
-        "messages": [{"role": "user", "content": prompt, "images": [_data_url(pair.cover), _data_url(pair.info)]}],
-        "keep_alive": "30m",
-        "options": {"temperature": 0, "num_predict": 512},
-    }).encode("utf-8")
+def _ollama_chat(host: str, payload: dict[str, Any], timeout: float) -> dict[str, Any]:
+    """Send one chat payload to Ollama with transient-error retries."""
+    data = json.dumps(payload).encode("utf-8")
     request = urllib.request.Request(
-        host.rstrip("/") + "/api/chat", data=payload,
+        host.rstrip("/") + "/api/chat", data=data,
         headers={"Content-Type": "application/json"}, method="POST",
     )
     attempts = max(1, int(os.getenv("OLLAMA_RETRIES", "3")))
-    answer = None
     for attempt in range(attempts):
         try:
             with urllib.request.urlopen(request, timeout=timeout) as response:
-                answer = json.load(response)
-            break
+                return json.load(response)
         except urllib.error.HTTPError as error:
             details = error.read().decode("utf-8", errors="replace")
             if error.code < 500 or attempt == attempts - 1:
@@ -127,14 +112,53 @@ def query_ollama(pair: PhotoPair, model: str, host: str, timeout: float) -> dict
             if attempt == attempts - 1:
                 raise RuntimeError(f"Потеряно соединение с Ollama после {attempts} попыток: {error}") from error
         time.sleep(min(2 ** attempt, 10))
-    if answer is None:
-        raise RuntimeError("Ollama не вернула ответ")
+    raise RuntimeError("Ollama не вернула ответ")
+
+
+def query_ollama(pair: PhotoPair, model: str, host: str, timeout: float) -> dict[str, str]:
+    schema = {field: "" for field in FIELDS}
+    prompt = (
+        "На первом изображении обложка книги, на втором — выходные данные издательства. "
+        "Точно распознай сведения только с изображений. Ничего не выдумывай. "
+        "Если значение не видно или его нет, оставь пустую строку. "
+        "Верни только один JSON-объект с ключами в точности как в шаблоне: "
+        + json.dumps(schema, ensure_ascii=False)
+    )
+    payload = {
+        "model": model,
+        "stream": False,
+        "format": "json",
+        "messages": [{"role": "user", "content": prompt, "images": [_data_url(pair.cover), _data_url(pair.info)]}],
+        "keep_alive": "30m",
+        "options": {"temperature": 0, "num_predict": 512},
+    }
+    answer = _ollama_chat(host, payload, timeout)
     content = answer.get("message", {}).get("content", "")
     extracted = _extract_json(content)
     return {field: str(extracted.get(field) or "").strip() for field in FIELDS}
 
 
-def process_pair(pair: PhotoPair, models: list[str], host: str, timeout: float) -> dict[str, str]:
+def normalize_metadata(metadata: dict[str, str], evidence: list[dict[str, Any]], model: str, host: str, timeout: float) -> dict[str, str]:
+    """Use a separate text model to normalize OCR fields against online evidence."""
+    prompt = (
+        "Нормализуй библиографические данные книги, используя исходное распознавание и результаты интернет-поиска. "
+        "Не объединяй разные книги и не выдумывай сведения. Исправь регистр названия, укажи полное имя автора, "
+        "оставь в поле Тираж только цифры, установи язык (например, русский или немецкий), ISBN и жанр. "
+        "Заполни другие пропуски только при надёжном совпадении. Верни только JSON со всеми ключами шаблона.\n"
+        f"Шаблон: {json.dumps({field: '' for field in FIELDS}, ensure_ascii=False)}\n"
+        f"Распознано: {json.dumps(metadata, ensure_ascii=False)}\n"
+        f"Библиографические интернет-источники: {json.dumps(evidence, ensure_ascii=False)[:24000]}"
+    )
+    answer = _ollama_chat(host, {
+        "model": model, "stream": False, "format": "json", "keep_alive": "30m",
+        "messages": [{"role": "user", "content": prompt}],
+        "options": {"temperature": 0, "num_predict": 768},
+    }, timeout)
+    parsed = _extract_json(answer.get("message", {}).get("content", ""))
+    return {field: str(parsed.get(field) or "").strip() for field in FIELDS}
+
+
+def process_pair(pair: PhotoPair, models: list[str], host: str, timeout: float, normalization_model: str | None = None, internet_search: ProviderRegistry | None = None) -> dict[str, str]:
     result = {field: "" for field in FIELDS}
     errors: list[str] = []
     successful_models = 0
@@ -151,6 +175,15 @@ def process_pair(pair: PhotoPair, models: list[str], host: str, timeout: float) 
         print(f"Предупреждение: {pair.cover}: {'; '.join(errors)}", file=sys.stderr)
     if not successful_models:
         raise RuntimeError(f"Не удалось обработать {pair.cover.name}: {'; '.join(errors)}")
+    if normalization_model:
+        try:
+            evidence = [item.as_dict() for item in internet_search.search(result)] if internet_search else []
+            normalized = normalize_metadata(result, evidence, normalization_model, host, timeout)
+            result = {field: normalized[field] or result[field] for field in FIELDS}
+        except Exception as error:
+            print(f"Предупреждение: нормализация {pair.cover}: {error}", file=sys.stderr)
+    if result["Тираж"]:
+        result["Тираж"] = "".join(re.findall(r"\d+", result["Тираж"]))
     return {
         "Коробка": pair.box,
         **result,
@@ -186,6 +219,8 @@ def process_books(
     host: str, timeout: float,
     on_progress: Callable[[dict[str, str], int, int], None] | None = None,
     on_start: Callable[[int], None] | None = None,
+    normalization_model: str | None = None,
+    internet_search: ProviderRegistry | None = None,
 ) -> list[dict[str, str]]:
     """Process selected boxes and return rows in deterministic photo order."""
     if workers < 1:
@@ -198,7 +233,7 @@ def process_books(
     rows: list[dict[str, str] | None] = [None] * len(pairs)
     with ThreadPoolExecutor(max_workers=workers) as executor:
         futures = {
-            executor.submit(process_pair, pair, models, host, timeout): index
+            executor.submit(process_pair, pair, models, host, timeout, normalization_model, internet_search): index
             for index, pair in enumerate(pairs)
         }
         completed = 0
@@ -216,6 +251,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("root", type=Path, help="Корневая папка с папками-коробками")
     parser.add_argument("--folders", nargs="+", metavar="ПАПКА", help="Обработать только указанные папки")
     parser.add_argument("--models", default="qwen2.5vl:7b", help="Модели Ollama через запятую")
+    parser.add_argument("--normalization-model", default="", help="Отдельная модель интернет-нормализации; запускается только при явном указании")
     parser.add_argument("--workers", type=int, default=1, help="Количество параллельных пар (по умолчанию: 1)")
     parser.add_argument("--output", type=Path, help="Дополнительно сохранить копию в .xlsx")
     parser.add_argument("--database-url", default=os.getenv("DATABASE_URL", "postgresql://bookprocessor:bookprocessor@localhost:5432/bookprocessor"), help="Строка подключения PostgreSQL")
@@ -228,14 +264,18 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     models = [model.strip() for model in args.models.split(",") if model.strip()]
     try:
+        registry = create_registry(os.environ) if args.normalization_model.strip() else None
         rows = process_books(
             args.root, args.folders, models, args.workers, args.ollama_host, args.timeout,
+            normalization_model=args.normalization_model.strip() or None,
+            internet_search=registry,
         )
     except (OSError, ValueError) as error:
         raise SystemExit(str(error)) from error
     from database import save_books
     try:
-        job_id = save_books(args.database_url, rows, str(args.root), args.folders, models)
+        stored_models = [*models, *([args.normalization_model.strip()] if args.normalization_model.strip() else [])]
+        job_id = save_books(args.database_url, rows, str(args.root), args.folders, stored_models)
     except RuntimeError as error:
         raise SystemExit(str(error)) from error
     print(f"Результаты сохранены в PostgreSQL, ID обработки: {job_id}")
